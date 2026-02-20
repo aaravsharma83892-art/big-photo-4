@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3.5x5 Editor: 10.5cm Sheet</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+
+    <style>
+        :root { --primary: #2563eb; --dark: #1e293b; --success: #16a34a; }
+        body { margin: 0; padding: 20px; background-color: #f1f5f9; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; }
+        .editor-container { background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 1000px; overflow: hidden; margin-bottom: 20px; display: flex; flex-direction: column; }
+        .header-bar { background: var(--dark); color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .step-view { padding: 20px; display: none; min-height: 400px; }
+        .step-view.active { display: block; }
+        .crop-area { height: 450px; background: #e2e8f0; border-radius: 8px; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        #rawImage { max-width: 100%; display: none; }
+        .adjust-layout { display: grid; grid-template-columns: 1fr 340px; gap: 20px; }
+        .preview-final { background: #e2e8f0; border: 2px dashed #cbd5e1; border-radius: 8px; display: flex; justify-content: center; align-items: center; height: 500px; overflow: hidden; }
+        .preview-final img { max-width: 90%; max-height: 90%; border: 1px solid #000; }
+        .controls-sidebar { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; }
+        label { font-size: 11px; font-weight: 700; color: #475569; margin-bottom: 4px; display: block; text-transform: uppercase; }
+        input[type=range] { width: 100%; margin-bottom: 12px; accent-color: var(--primary); }
+        select, textarea, input[type=datetime-local] { width: 100%; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px; font-size: 13px; margin-bottom: 10px; box-sizing: border-box; }
+        .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: white; font-size: 14px; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-blue { background: var(--primary); }
+        .btn-green { background: var(--success); width: 100%; margin-top: 10px; padding: 12px; }
+        .btn-gray { background: #64748b; }
+        /* Canvas centered and sized for 10.5cm */
+        .canvas-area { box-shadow: 0 0 20px rgba(0,0,0,0.15); background: white; border: 1px solid #ddd; margin-top: 20px; width: 397px; }
+        
+        @media print {
+            .editor-container, .instruction, .header-bar { display: none !important; }
+            body { background: white; margin: 0; padding: 0; }
+            .canvas-area { box-shadow: none; border: none; margin: 0; width: 10.5cm; }
+            @page { size: 10.5cm 29.7cm; margin: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="instruction" style="width: 100%; max-width: 1000px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+            <h3 style="margin:0 0 5px 0; color: var(--dark);">Passport Photo Maker Pro</h3>
+            <span style="font-size: 13px; color: #64748b;">Sheet Width: <b>10.5 cm</b> | Photo Size: <b>3.5 x 5 Inches</b></span>
+        </div>
+        <button class="btn btn-green" onclick="window.print()" style="width: auto; margin:0;">🖨️ Print Sheet</button>
+    </div>
+
+    <div class="editor-container">
+        <div class="header-bar">
+            <span id="stepTitle">Step 1: Select & Crop</span>
+            <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFile(event)">
+            <button class="btn btn-gray" style="font-size: 12px; padding: 5px 10px;" onclick="document.getElementById('fileInput').click()">📂 Open File</button>
+        </div>
+
+        <div id="step1" class="step-view active">
+            <div class="crop-area">
+                <div id="uploadPrompt"><p>Press <b>Ctrl + V</b> to paste photo</p></div>
+                <img id="rawImage">
+            </div>
+            <div style="padding: 15px; text-align: right;">
+                <button class="btn btn-blue" onclick="goToStep2()">Next: Adjust & Geo-Tag ➡️</button>
+            </div>
+        </div>
+
+        <div id="step2" class="step-view">
+            <div class="adjust-layout">
+                <div class="preview-final"><img id="croppedResult"></div>
+                <div class="controls-sidebar">
+                    <label>Brightness</label>
+                    <input type="range" id="bright" min="0.5" max="2.0" step="0.05" value="1.0" oninput="applyFilters()">
+                    <label>Contrast</label>
+                    <input type="range" id="contrast" min="0.5" max="2.0" step="0.05" value="1.0" oninput="applyFilters()">
+                    <label>Saturation</label>
+                    <input type="range" id="saturate" min="0" max="2.0" step="0.1" value="1.0" oninput="applyFilters()">
+
+                    <hr style="margin: 10px 0; border: 0; border-top: 1px solid #e2e8f0;">
+                    
+                    <label>📍 Select Address</label>
+                    <select id="addressDropdown" onchange="updateManualAddress()">
+                        <option value="">-- Manual/Auto Fill --</option>
+                        <option value="115, Rakesh Marg, New Gandhi Nagar, Gandhi Nagar, Nehru Nagar, Ghaziabad, Uttar Pradesh 201001, India">115, Rakesh Marg, Ghaziabad</option>
+                    </select>
+
+                    <label>✍️ Edit Address Manually</label>
+                    <textarea id="geoAddress" rows="3"></textarea>
+                    
+                    <label>🛰️ Lat/Long/Alt</label>
+                    <input type="text" id="geoCoords" readonly style="width:100%; font-size:11px; background:#f1f5f9; border:none; margin-bottom:10px;">
+
+                    <label>📅 Date & Time</label>
+                    <input type="datetime-local" id="geoDateTime">
+
+                    <button class="btn btn-green" onclick="addToCanvas()">⬇️ Add to Sheet</button>
+                    <button class="btn btn-gray" style="width:100%; margin-top:10px;" onclick="backToStep1()">⬅️ Change Photo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="canvas-area">
+        <canvas id="a4Canvas" width="397" height="1123"></canvas>
+    </div>
+
+    <script>
+        const DPI = 96;
+        const W_35 = 3.5 * DPI; // Remains 3.5 inches
+        const H_50 = 5.0 * DPI; // Remains 5.0 inches
+        let cropper = null;
+        let currentCroppedDataUrl = null;
+        const canvas = new fabric.Canvas('a4Canvas', { backgroundColor: 'white' });
+
+        const MAP_ICON_URL = "https://play-lh.googleusercontent.com/VgtlIEKhAL7C3l2VhvqvTtCr7wwtp_ddFuP1iSe-hbu_nE2x5BSW-548zRzM4hyr7A";
+        let fixedMapIcon = new Image();
+        fixedMapIcon.crossOrigin = "anonymous"; 
+        fixedMapIcon.src = MAP_ICON_URL;
+
+        window.addEventListener('paste', e => {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let item of items) {
+                if (item.kind === 'file' && item.type.startsWith('image/')) {
+                    const blob = item.getAsFile();
+                    backToStep1(); 
+                    loadFile(blob);
+                }
+            }
+        });
+
+        function handleFile(event) { if(event.target.files[0]) loadFile(event.target.files[0]); }
+
+        function loadFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                document.getElementById('uploadPrompt').style.display = 'none';
+                const img = document.getElementById('rawImage');
+                img.src = e.target.result; 
+                img.style.display = 'block';
+                if(cropper) {
+                    cropper.replace(e.target.result); 
+                } else {
+                    cropper = new Cropper(img, { aspectRatio: 3.5 / 5, viewMode: 1 });
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function backToStep1() {
+            document.getElementById('step2').classList.remove('active');
+            document.getElementById('step1').classList.add('active');
+            document.getElementById('stepTitle').innerText = "Step 1: Select & Crop";
+        }
+
+        function goToStep2() {
+            if(!cropper) return;
+            currentCroppedDataUrl = cropper.getCroppedCanvas({ width: 1000, height: 1428 }).toDataURL('image/jpeg');
+            document.getElementById('croppedResult').src = currentCroppedDataUrl;
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('geoDateTime').value = now.toISOString().slice(0, 16);
+            fetchLocation();
+            document.getElementById('step1').classList.remove('active');
+            document.getElementById('step2').classList.add('active');
+        }
+
+        function fetchLocation() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(async (p) => {
+                    const lat = p.coords.latitude.toFixed(6);
+                    const lon = p.coords.longitude.toFixed(6);
+                    const alt = p.coords.altitude ? p.coords.altitude.toFixed(1) : "0.0";
+                    document.getElementById('geoCoords').value = `LAT: ${lat} | LON: ${lon} | ALT: ${alt}m`;
+                    try {
+                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+                        const data = await res.json();
+                        const addr = data.display_name.replace(/[^\w\s,]/gi, '');
+                        const pin = data.address.postcode || "";
+                        if (!document.getElementById('addressDropdown').value) {
+                             document.getElementById('geoAddress').value = `${addr} ${pin}`.trim();
+                        }
+                    } catch(e) { }
+                });
+            }
+        }
+
+        function updateManualAddress() {
+            const dropdown = document.getElementById('addressDropdown');
+            const manualText = document.getElementById('geoAddress');
+            if (dropdown.value) {
+                manualText.value = dropdown.value;
+            }
+        }
+
+        function applyFilters() {
+            const img = document.getElementById('croppedResult');
+            img.style.filter = `brightness(${document.getElementById('bright').value}) contrast(${document.getElementById('contrast').value}) saturate(${document.getElementById('saturate').value})`;
+        }
+
+        function roundRect(ctx, x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y); ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height); ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius); ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+
+        function addToCanvas() {
+            const tempCanvas = document.createElement('canvas');
+            const ctx = tempCanvas.getContext('2d');
+            const sourceImg = document.getElementById('croppedResult');
+            tempCanvas.width = sourceImg.naturalWidth;
+            tempCanvas.height = sourceImg.naturalHeight;
+
+            ctx.filter = `brightness(${document.getElementById('bright').value}) contrast(${document.getElementById('contrast').value}) saturate(${document.getElementById('saturate').value})`;
+            ctx.drawImage(sourceImg, 0, 0);
+            ctx.filter = "none";
+
+            const margin = tempCanvas.width * 0.05;
+            const boxHeight = tempCanvas.height * 0.16;
+            const iconSize = boxHeight * 1.1;
+            const boxX = margin + iconSize + 15;
+            const boxY = tempCanvas.height - boxHeight - margin;
+            const boxWidth = tempCanvas.width - boxX - margin;
+
+            if (fixedMapIcon.complete) {
+                ctx.drawImage(fixedMapIcon, margin, tempCanvas.height - iconSize - margin, iconSize, iconSize);
+            }
+
+            ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+            roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 15);
+            ctx.fill();
+
+            const padding = 20;
+            const fontSize = Math.floor(tempCanvas.height * 0.026);
+            ctx.fillStyle = "white";
+            ctx.font = `bold ${fontSize}px Arial`;
+            const dateStr = document.getElementById('geoDateTime').value.replace('T', ' ');
+            ctx.fillText(dateStr, boxX + padding, boxY + padding + fontSize);
+            
+            ctx.font = `${fontSize * 0.7}px Arial`;
+            ctx.fillText(document.getElementById('geoCoords').value, boxX + padding, boxY + padding + (fontSize * 2.3));
+            
+            ctx.font = `bold ${fontSize * 0.75}px Arial`;
+            const addr = document.getElementById('geoAddress').value;
+            const lines = addr.match(/.{1,40}(\s|$)/g) || [addr];
+            ctx.fillText(lines[0], boxX + padding, boxY + padding + (fontSize * 3.6));
+            if(lines[1]) ctx.fillText(lines[1], boxX + padding, boxY + padding + (fontSize * 4.7));
+
+            fabric.Image.fromURL(tempCanvas.toDataURL('image/jpeg', 0.95), function(img) {
+                img.set({ scaleX: W_35 / img.width, scaleY: H_50 / img.height, originX: 'center', originY: 'center' });
+                const border = new fabric.Rect({ width: W_35, height: H_50, fill: 'transparent', stroke: '#000', strokeWidth: 3, originX: 'center', originY: 'center' });
+                // Center the photo on the new 10.5cm width sheet
+                const group = new fabric.Group([img, border], { left: 397/2, top: 200, originX: 'center', originY: 'center' });
+                canvas.add(group);
+                canvas.setActiveObject(group);
+            });
+        }
+    </script>
+</body>
+</html>
